@@ -3,6 +3,7 @@ package service
 import (
 	"go-one/internal/model"
 	"go-one/internal/repository"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -29,8 +30,9 @@ type RegisterDTO struct {
 
 // RegisterResult 注册结果
 type RegisterResult struct {
-	User  *model.User
-	Token string
+	User         *model.User
+	AccessToken  string
+	RefreshToken string
 }
 
 // Register 用户注册
@@ -91,8 +93,8 @@ func (s *UserService) Register(ctx *BusinessContext, dto *RegisterDTO) (*Registe
 		}
 	}
 
-	// 生成token
-	token, err := s.GenerateToken(user)
+	// 生成token对
+	accessToken, refreshToken, err := GenerateTokenPair(user)
 	if err != nil {
 		return nil, &BusinessError{
 			Message: "生成令牌失败",
@@ -102,8 +104,9 @@ func (s *UserService) Register(ctx *BusinessContext, dto *RegisterDTO) (*Registe
 	}
 
 	return &RegisterResult{
-		User:  user,
-		Token: token,
+		User:         user,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
 	}, nil
 }
 
@@ -115,8 +118,9 @@ type LoginDTO struct {
 
 // LoginResult 登录结果
 type LoginResult struct {
-	User  *model.User
-	Token string
+	User         *model.User
+	AccessToken  string
+	RefreshToken string
 }
 
 // Login 用户登录
@@ -160,8 +164,8 @@ func (s *UserService) Login(ctx *BusinessContext, dto *LoginDTO) (*LoginResult, 
 		}
 	}
 
-	// 生成token
-	token, err := s.GenerateToken(user)
+	// 生成token对
+	accessToken, refreshToken, err := GenerateTokenPair(user)
 	if err != nil {
 		return nil, &BusinessError{
 			Message: "生成令牌失败",
@@ -171,13 +175,14 @@ func (s *UserService) Login(ctx *BusinessContext, dto *LoginDTO) (*LoginResult, 
 	}
 
 	return &LoginResult{
-		User:  user,
-		Token: token,
+		User:         user,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
 	}, nil
 }
 
 // GetUserByID 根据ID获取用户
-func (s *UserService) GetUserByID(ctx *BusinessContext	) (*model.User, ServiceError) {
+func (s *UserService) GetUserByID(ctx *BusinessContext) (*model.User, ServiceError) {
 	user, err := s.userRepo.FindByID(ctx.Account.ID)
 	if err != nil {
 		return nil, &NotFoundError{
@@ -316,7 +321,70 @@ func (s *UserService) ListUsers(ctx *BusinessContext, query *ListUsersQuery) (*L
 	}, nil
 }
 
-// GenerateToken 生成JWT token
-func (s *UserService) GenerateToken(user *model.User) (string, error) {
-	return GenerateJWTWithUser(user)
+// RefreshTokenDTO 刷新令牌请求DTO
+type RefreshTokenDTO struct {
+	RefreshToken string
+}
+
+// RefreshTokenResult 刷新令牌结果
+type RefreshTokenResult struct {
+	AccessToken  string
+	RefreshToken string
+}
+
+// RefreshToken 刷新访问令牌
+func (s *UserService) RefreshToken(ctx *BusinessContext, dto *RefreshTokenDTO) (*RefreshTokenResult, ServiceError) {
+	// 参数验证
+	if dto.RefreshToken == "" {
+		return nil, &ValidationError{
+			Message: "刷新令牌不能为空",
+			Code:    40000,
+		}
+	}
+
+	// 验证refresh token
+	claims, err := ValidateRefreshToken(dto.RefreshToken)
+	if err != nil {
+		return nil, &AuthError{
+			Message: "刷新令牌无效或已过期",
+		}
+	}
+
+	// 从数据库获取最新的用户信息
+	userID, err := strconv.ParseUint(claims.UserID, 10, 64)
+	if err != nil {
+		return nil, &AuthError{
+			Message: "无效的用户ID",
+		}
+	}
+
+	user, err := s.userRepo.FindByID(uint(userID))
+	if err != nil {
+		return nil, &NotFoundError{
+			Message: "用户不存在",
+		}
+	}
+
+	// 检查用户状态
+	if user.Status != 1 {
+		return nil, &BusinessError{
+			Message: "账号已被禁用",
+			Code:    40003,
+		}
+	}
+
+	// 生成新的token对
+	accessToken, refreshToken, err := GenerateTokenPair(user)
+	if err != nil {
+		return nil, &BusinessError{
+			Message: "生成令牌失败",
+			Code:    50000,
+			Err:     err,
+		}
+	}
+
+	return &RefreshTokenResult{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
 }

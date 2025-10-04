@@ -34,6 +34,11 @@ type ChangePasswordRequest struct {
 	NewPassword string `json:"new_password" binding:"required,min=6"`
 }
 
+// RefreshTokenRequest 刷新令牌请求
+type RefreshTokenRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
 // UserRegister 用户注册
 func (h *Handler) UserRegister(c *gin.Context) {
 	// 1. 获取BusinessContext（与HTTP层解耦）
@@ -63,8 +68,9 @@ func (h *Handler) UserRegister(c *gin.Context) {
 
 	// 5. 返回成功响应
 	ResponseWithMessage(c, "注册成功", gin.H{
-		"user":  result.User,
-		"token": result.Token,
+		"user":          result.User,
+		"access_token":  result.AccessToken,
+		"refresh_token": result.RefreshToken,
 	})
 }
 
@@ -96,8 +102,9 @@ func (h *Handler) UserLogin(c *gin.Context) {
 
 	// 5. 返回成功响应
 	ResponseWithMessage(c, "登录成功", gin.H{
-		"user":  result.User,
-		"token": result.Token,
+		"user":          result.User,
+		"access_token":  result.AccessToken,
+		"refresh_token": result.RefreshToken,
 	})
 }
 
@@ -231,6 +238,38 @@ func (h *Handler) ListUsers(c *gin.Context) {
 		"total":     result.Total,
 		"page":      result.Page,
 		"page_size": result.PageSize,
+	})
+}
+
+// RefreshToken 刷新访问令牌
+func (h *Handler) RefreshToken(c *gin.Context) {
+	// 1. 获取BusinessContext
+	bizCtx := GetBusinessContext(c)
+
+	// 2. 绑定请求参数
+	var req RefreshTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, serializer.ParamErr("参数错误", err))
+		return
+	}
+
+	// 3. 转换为Service层DTO
+	dto := &service.RefreshTokenDTO{
+		RefreshToken: req.RefreshToken,
+	}
+
+	// 4. 调用Service层
+	userService := h.serviceManager.NewUserService()
+	result, serviceErr := userService.RefreshToken(bizCtx, dto)
+	if serviceErr != nil {
+		HandleServiceError(c, serviceErr)
+		return
+	}
+
+	// 5. 返回成功响应
+	ResponseWithMessage(c, "刷新成功", gin.H{
+		"access_token":  result.AccessToken,
+		"refresh_token": result.RefreshToken,
 	})
 }
 

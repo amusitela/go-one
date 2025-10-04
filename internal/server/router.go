@@ -38,6 +38,7 @@ func NewRouter() *gin.Engine {
 			auth.Use(middleware.RateLimitMiddleware(6, 10*time.Second, "ip"))
 			auth.POST("/register", h.UserRegister)
 			auth.POST("/login", h.UserLogin)
+			auth.POST("/refresh", h.RefreshToken) // 刷新令牌
 		}
 
 		// 健康检查

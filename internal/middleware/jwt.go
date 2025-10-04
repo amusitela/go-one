@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 // JWTMiddleware JWT认证中间件
@@ -31,19 +30,16 @@ func JWTMiddleware() gin.HandlerFunc {
 
 		tokenString := parts[1]
 
-		// 解析token
-		token, err := jwt.ParseWithClaims(tokenString, &service.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-			return []byte(service.JWT.Secret), nil
-		})
-
-		if err != nil || !token.Valid {
+		// 验证访问令牌
+		claims, err := service.ValidateAccessToken(tokenString)
+		if err != nil {
 			c.JSON(http.StatusUnauthorized, serializer.Err(serializer.CodeUnauthorized, "认证令牌无效或已过期", nil))
 			c.Abort()
 			return
 		}
 
 		// 获取claims并创建BusinessContext
-		if claims, ok := token.Claims.(*service.JWTClaims); ok {
+		if claims != nil {
 			// 创建BusinessContext并注入上下文
 			bizCtx := service.NewBusinessContext(c.Request.Context()).
 				WithClaims(claims).
