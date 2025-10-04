@@ -1,0 +1,32 @@
+# 环境变量
+.env
+
+# 日志文件
+logs/*.log
+
+# 二进制文件
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# 测试文件
+*.test
+*.out
+coverage.txt
+
+# Go工作空间
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
