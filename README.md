@@ -1,6 +1,6 @@
-# Go-One 企业级后端开发框架
+# Go-One 后端开发框架
 
-> 🚀 一个从生产环境提炼的现代化 Go 后端脚手架，开箱即用，快速构建企业级应用
+> 🚀 一个 Go 后端脚手架，开箱即用，快速构建应用
 
 [![Go Version](https://img.shields.io/badge/Go-1.23%2B-blue)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -180,8 +180,9 @@ go-one/
 │   │   └── redis.go
 │   ├── conf/             # 配置管理
 │   │   └── conf.go
-│   ├── serializer/       # 响应序列化
-│   │   └── common.go
+│   ├── serializer/       # VTO - 视图传输对象
+│   │   ├── common.go           # 通用响应结构
+│   │   └── user.go             # 用户相关VTO
 │   └── server/           # 路由配置
 │       └── router.go
 ├── util/                 # 工具函数
@@ -203,6 +204,7 @@ go-one/
 ├─────────────────────────────────────────┤
 │   API Layer (Handler)                   │  ← 参数绑定、响应序列化
 │   - 转换 Request → DTO                   │
+│   - 转换 Model → VTO                     │  ← VTO：View Transfer Object
 │   - 转换 ServiceError → HTTP Response   │
 ├─────────────────────────────────────────┤
 │   BusinessContext (适配器)               │  ← 解耦HTTP与业务层
@@ -268,9 +270,12 @@ func (h *Handler) UserRegister(c *gin.Context) {
     
     // 2. 绑定请求参数
     var req RegisterRequest
-    c.ShouldBindJSON(&req)
+    if err := c.ShouldBindJSON(&req); err != nil {
+        c.JSON(http.StatusBadRequest, serializer.ParamErr("参数错误", err))
+        return
+    }
     
-    // 3. 转换为DTO
+    // 3. 转换为Service层DTO
     dto := &service.RegisterDTO{
         Username: req.Username,
         Email:    req.Email,
@@ -284,8 +289,13 @@ func (h *Handler) UserRegister(c *gin.Context) {
         return
     }
     
-    // 5. 返回成功响应
-    ResponseWithMessage(c, "注册成功", result)
+    // 5. 构建VTO并返回
+    vto := &serializer.AuthTokenVTO{
+        User:         serializer.BuildUserVTO(result.User),
+        AccessToken:  result.AccessToken,
+        RefreshToken: result.RefreshToken,
+    }
+    c.JSON(http.StatusOK, serializer.Success("注册成功", vto))
 }
 
 // Service层：纯业务逻辑
@@ -311,11 +321,42 @@ func (s *UserService) Register(ctx *BusinessContext, dto *RegisterDTO) (*Registe
 }
 ```
 
+#### 4. VTO - 视图传输对象
+
+VTO（View Transfer Object）用于序列化HTTP响应，将内部Model转换为API响应格式：
+
+```go
+// serializer/user.go
+type UserVTO struct {
+    ID        uint      `json:"id"`
+    Username  string    `json:"username"`
+    Email     string    `json:"email,omitempty"`
+    Nickname  string    `json:"nickname"`
+    Avatar    string    `json:"avatar"`
+    CreatedAt time.Time `json:"created_at"`
+    UpdatedAt time.Time `json:"updated_at"`
+}
+
+// 将Model转换为VTO
+func BuildUserVTO(user *model.User) *UserVTO {
+    return &UserVTO{
+        ID:       user.ID,
+        Username: user.Username,
+        Email:    user.Email,
+        Nickname: user.Nickname,
+        Avatar:   user.Avatar,
+        CreatedAt: user.CreatedAt,
+        UpdatedAt: user.UpdatedAt,
+    }
+}
+```
+
 **优势**：
 - ✅ Service层完全独立，可在任何环境使用（HTTP、gRPC、CLI、消息队列）
 - ✅ 易于编写单元测试，无需模拟HTTP上下文
 - ✅ 清晰的错误处理流程
-- ✅ 类型安全，代码可维护性高
+- ✅ VTO提供类型安全的响应结构，隐藏敏感字段（如密码）
+- ✅ 代码可维护性高
 
 ---
 
@@ -428,7 +469,43 @@ func (sm *ServiceManager) NewArticleService() *ArticleService {
 }
 ```
 
-#### 5. 创建API Handler `internal/api/article.go`
+#### 5. 创建VTO `internal/serializer/article.go`
+
+```go
+package serializer
+
+import (
+    "go-one/internal/model"
+    "time"
+)
+
+// ArticleVTO 文章VTO
+type ArticleVTO struct {
+    ID        uint      `json:"id"`
+    Title     string    `json:"title"`
+    Content   string    `json:"content"`
+    UserID    uint      `json:"user_id"`
+    CreatedAt time.Time `json:"created_at"`
+    UpdatedAt time.Time `json:"updated_at"`
+}
+
+// BuildArticleVTO 构建文章VTO
+func BuildArticleVTO(article *model.Article) *ArticleVTO {
+    if article == nil {
+        return nil
+    }
+    return &ArticleVTO{
+        ID:        article.ID,
+        Title:     article.Title,
+        Content:   article.Content,
+        UserID:    article.UserID,
+        CreatedAt: article.CreatedAt,
+        UpdatedAt: article.UpdatedAt,
+    }
+}
+```
+
+#### 6. 创建API Handler `internal/api/article.go`
 
 ```go
 package api
@@ -445,11 +522,11 @@ func (h *Handler) CreateArticle(c *gin.Context) {
     // 2. 绑定请求
     var req CreateArticleRequest
     if err := c.ShouldBindJSON(&req); err != nil {
-        c.JSON(400, serializer.ParamErr("参数错误", err))
+        c.JSON(http.StatusBadRequest, serializer.ParamErr("参数错误", err))
         return
     }
     
-    // 3. 转换DTO
+    // 3. 转换为Service层DTO
     dto := &service.CreateArticleDTO{
         Title:   req.Title,
         Content: req.Content,
@@ -463,12 +540,13 @@ func (h *Handler) CreateArticle(c *gin.Context) {
         return
     }
     
-    // 5. 返回响应
-    ResponseWithMessage(c, "创建成功", article)
+    // 5. 构建VTO并返回
+    vto := serializer.BuildArticleVTO(article)
+    c.JSON(http.StatusOK, serializer.Success("创建成功", vto))
 }
 ```
 
-#### 6. 添加路由 `internal/server/router.go`
+#### 7. 添加路由 `internal/server/router.go`
 
 ```go
 protected := v1.Group("")

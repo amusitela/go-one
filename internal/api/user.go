@@ -67,11 +67,12 @@ func (h *Handler) UserRegister(c *gin.Context) {
 	}
 
 	// 5. 返回成功响应
-	ResponseWithMessage(c, "注册成功", gin.H{
-		"user":          result.User,
-		"access_token":  result.AccessToken,
-		"refresh_token": result.RefreshToken,
-	})
+	vto := &serializer.AuthTokenVTO{
+		User:         serializer.BuildUserVTO(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+	}
+	c.JSON(http.StatusOK, serializer.Success("注册成功", vto))
 }
 
 // UserLogin 用户登录
@@ -101,11 +102,12 @@ func (h *Handler) UserLogin(c *gin.Context) {
 	}
 
 	// 5. 返回成功响应
-	ResponseWithMessage(c, "登录成功", gin.H{
-		"user":          result.User,
-		"access_token":  result.AccessToken,
-		"refresh_token": result.RefreshToken,
-	})
+	vto := &serializer.AuthTokenVTO{
+		User:         serializer.BuildUserVTO(result.User),
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+	}
+	c.JSON(http.StatusOK, serializer.Success("登录成功", vto))
 }
 
 // GetUserProfile 获取用户资料
@@ -134,7 +136,7 @@ func (h *Handler) GetUserProfile(c *gin.Context) {
 	}
 
 	// 4. 返回成功响应
-	ResponseWithMessage(c, "获取成功", user)
+	c.JSON(http.StatusOK, serializer.Success("获取成功", serializer.BuildUserVTO(user)))
 }
 
 // UpdateUserProfile 更新用户资料
@@ -170,7 +172,7 @@ func (h *Handler) UpdateUserProfile(c *gin.Context) {
 	}
 
 	// 6. 返回成功响应
-	ResponseWithMessage(c, "更新成功", nil)
+	c.JSON(http.StatusOK, serializer.Success("更新成功", nil))
 }
 
 // ChangePassword 修改密码
@@ -206,7 +208,7 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 	}
 
 	// 6. 返回成功响应
-	ResponseWithMessage(c, "密码修改成功", nil)
+	c.JSON(http.StatusOK, serializer.Success("密码修改成功", nil))
 }
 
 // ListUsers 获取用户列表
@@ -233,12 +235,17 @@ func (h *Handler) ListUsers(c *gin.Context) {
 	}
 
 	// 5. 返回成功响应
-	ResponseWithMessage(c, "获取成功", gin.H{
-		"list":      result.List,
-		"total":     result.Total,
-		"page":      result.Page,
-		"page_size": result.PageSize,
-	})
+	list := make([]*serializer.UserVTO, len(result.List))
+	for i, user := range result.List {
+		list[i] = serializer.BuildUserVTO(&user)
+	}
+	vto := &serializer.UserListVTO{
+		List:     list,
+		Total:    result.Total,
+		Page:     result.Page,
+		PageSize: result.PageSize,
+	}
+	c.JSON(http.StatusOK, serializer.Success("获取成功", vto))
 }
 
 // RefreshToken 刷新访问令牌
@@ -267,10 +274,11 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 	}
 
 	// 5. 返回成功响应
-	ResponseWithMessage(c, "刷新成功", gin.H{
-		"access_token":  result.AccessToken,
-		"refresh_token": result.RefreshToken,
-	})
+	vto := &serializer.TokenPairVTO{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+	}
+	c.JSON(http.StatusOK, serializer.Success("刷新成功", vto))
 }
 
 // Ping 健康检查

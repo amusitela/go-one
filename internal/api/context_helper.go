@@ -64,13 +64,3 @@ func HandleServiceError(c *gin.Context, err service.ServiceError) {
 		c.JSON(httpStatus, serializer.Err(code, message, nil))
 	}
 }
-
-// Response 标准成功响应
-func Response(c *gin.Context, data interface{}) {
-	c.JSON(http.StatusOK, serializer.Success("操作成功", data))
-}
-
-// ResponseWithMessage 带自定义消息的成功响应
-func ResponseWithMessage(c *gin.Context, message string, data interface{}) {
-	c.JSON(http.StatusOK, serializer.Success(message, data))
-}
