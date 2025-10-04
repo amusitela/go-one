@@ -1,8 +1,8 @@
 package middleware
 
 import (
-	"go-one/internal/conf"
 	"go-one/internal/serializer"
+	"go-one/internal/service"
 	"net/http"
 	"strings"
 
@@ -32,8 +32,8 @@ func JWTMiddleware() gin.HandlerFunc {
 		tokenString := parts[1]
 
 		// 解析token
-		token, err := jwt.ParseWithClaims(tokenString, &conf.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-			return []byte(conf.JWT.Secret), nil
+		token, err := jwt.ParseWithClaims(tokenString, &service.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+			return []byte(service.JWT.Secret), nil
 		})
 
 		if err != nil || !token.Valid {
@@ -42,9 +42,15 @@ func JWTMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// 获取claims
-		if claims, ok := token.Claims.(*conf.JWTClaims); ok {
-			c.Set("userID", claims.UserID)
+		// 获取claims并创建BusinessContext
+		if claims, ok := token.Claims.(*service.JWTClaims); ok {
+			// 创建BusinessContext并注入上下文
+			bizCtx := service.NewBusinessContext(c.Request.Context()).
+				WithClaims(claims).
+				WithClientIP(c.ClientIP()).
+				WithUserAgent(c.GetHeader("User-Agent"))
+
+			c.Set("business_context", bizCtx)
 			c.Next()
 		} else {
 			c.JSON(http.StatusUnauthorized, serializer.Err(serializer.CodeUnauthorized, "无法解析认证信息", nil))

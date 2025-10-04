@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go-one/internal/cache"
 	"go-one/internal/serializer"
+	"go-one/internal/service"
 	"net/http"
 	"strconv"
 	"time"
@@ -21,13 +22,20 @@ func RateLimitMiddleware(limit int64, period time.Duration, identifierType strin
 		var identifier string
 		switch identifierType {
 		case "user":
-			userID, exists := c.Get("userID")
-			if !exists {
-				c.JSON(http.StatusInternalServerError, serializer.Err(serializer.CodeError, "无法获取用户信息进行限流", nil))
+			// 从 BusinessContext 获取用户信息
+			if bizCtxVal, exists := c.Get("business_context"); exists {
+				if bizCtx, ok := bizCtxVal.(*service.BusinessContext); ok && bizCtx.IsAuthenticated() {
+					identifier = bizCtx.UserUUID
+				} else {
+					c.JSON(http.StatusUnauthorized, serializer.Err(serializer.CodeUnauthorized, "用户未认证，无法进行限流", nil))
+					c.Abort()
+					return
+				}
+			} else {
+				c.JSON(http.StatusInternalServerError, serializer.Err(serializer.CodeError, "无法获取用户上下文", nil))
 				c.Abort()
 				return
 			}
-			identifier = fmt.Sprintf("%v", userID)
 		case "ip":
 			identifier = c.ClientIP()
 		default:

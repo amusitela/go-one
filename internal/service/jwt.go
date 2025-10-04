@@ -1,6 +1,8 @@
-package conf
+package service
 
 import (
+	"fmt"
+	"go-one/internal/model"
 	"go-one/util"
 	"os"
 	"strconv"
@@ -20,7 +22,8 @@ var JWT *JWTConfig
 
 // JWTClaims JWT声明
 type JWTClaims struct {
-	UserID string `json:"user_id"`
+	UserID  string      `json:"user_id"`
+	Account *model.User `json:"account"`
 	jwt.RegisteredClaims
 }
 
@@ -55,27 +58,13 @@ func InitJWT() {
 	util.Log().Info("JWT配置初始化完成")
 }
 
-// GenerateJWT 生成JWT token
-func GenerateJWT(userID string) (string, error) {
+// GenerateJWTWithUser 生成包含用户信息的JWT token
+func GenerateJWTWithUser(user *model.User) (string, error) {
 	claims := JWTClaims{
-		UserID: userID,
+		UserID:  fmt.Sprintf("%d", user.ID),
+		Account: user,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(JWT.AccessTokenExpire)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			NotBefore: jwt.NewNumericDate(time.Now()),
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(JWT.Secret))
-}
-
-// GenerateRefreshToken 生成刷新token
-func GenerateRefreshToken(userID string) (string, error) {
-	claims := JWTClaims{
-		UserID: userID,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(JWT.RefreshTokenExpire)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			NotBefore: jwt.NewNumericDate(time.Now()),
 		},

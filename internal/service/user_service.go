@@ -1,10 +1,9 @@
 package service
 
 import (
-	"errors"
-	"go-one/internal/conf"
 	"go-one/internal/model"
 	"go-one/internal/repository"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -21,117 +20,303 @@ func NewUserService(userRepo repository.UserRepository) *UserService {
 	}
 }
 
+// RegisterDTO 注册请求DTO
+type RegisterDTO struct {
+	Username string
+	Email    string
+	Password string
+}
+
+// RegisterResult 注册结果
+type RegisterResult struct {
+	User  *model.User
+	Token string
+}
+
 // Register 用户注册
-func (s *UserService) Register(username, email, password string) (*model.User, error) {
+func (s *UserService) Register(ctx *BusinessContext, dto *RegisterDTO) (*RegisterResult, ServiceError) {
+	// 参数验证
+	if dto.Username == "" || len(dto.Username) < 3 {
+		return nil, &ValidationError{
+			Message: "用户名长度至少为3个字符",
+			Code:    40000,
+		}
+	}
+	if dto.Password == "" || len(dto.Password) < 6 {
+		return nil, &ValidationError{
+			Message: "密码长度至少为6个字符",
+			Code:    40000,
+		}
+	}
+
 	// 检查用户名是否已存在
-	if _, err := s.userRepo.FindByUsername(username); err == nil {
-		return nil, errors.New("用户名已存在")
+	if _, err := s.userRepo.FindByUsername(dto.Username); err == nil {
+		return nil, &BusinessError{
+			Message: "用户名已存在",
+			Code:    40009,
+		}
 	}
 
 	// 检查邮箱是否已存在
-	if email != "" {
-		if _, err := s.userRepo.FindByEmail(email); err == nil {
-			return nil, errors.New("邮箱已被使用")
+	if dto.Email != "" {
+		if _, err := s.userRepo.FindByEmail(dto.Email); err == nil {
+			return nil, &BusinessError{
+				Message: "邮箱已被使用",
+				Code:    40009,
+			}
 		}
 	}
 
 	// 密码加密
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(dto.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, err
+		return nil, &DatabaseError{
+			Message: "密码加密失败",
+			Err:     err,
+		}
 	}
 
 	user := &model.User{
-		Username: username,
-		Email:    email,
+		Username: dto.Username,
+		Email:    dto.Email,
 		Password: string(hashedPassword),
-		Nickname: username,
+		Nickname: dto.Username,
 		Status:   1,
 	}
 
 	if err := s.userRepo.Create(user); err != nil {
-		return nil, err
+		return nil, &DatabaseError{
+			Message: "创建用户失败",
+			Err:     err,
+		}
 	}
 
-	return user, nil
+	// 生成token
+	token, err := s.GenerateToken(user)
+	if err != nil {
+		return nil, &BusinessError{
+			Message: "生成令牌失败",
+			Code:    50000,
+			Err:     err,
+		}
+	}
+
+	return &RegisterResult{
+		User:  user,
+		Token: token,
+	}, nil
+}
+
+// LoginDTO 登录请求DTO
+type LoginDTO struct {
+	Username string
+	Password string
+}
+
+// LoginResult 登录结果
+type LoginResult struct {
+	User  *model.User
+	Token string
 }
 
 // Login 用户登录
-func (s *UserService) Login(username, password string) (*model.User, error) {
-	user, err := s.userRepo.FindByUsername(username)
+func (s *UserService) Login(ctx *BusinessContext, dto *LoginDTO) (*LoginResult, ServiceError) {
+	// 参数验证
+	dto.Username = strings.TrimSpace(dto.Username)
+	dto.Password = strings.TrimSpace(dto.Password)
+
+	if dto.Username == "" {
+		return nil, &ValidationError{
+			Message: "用户名不能为空",
+			Code:    40000,
+		}
+	}
+	if dto.Password == "" {
+		return nil, &ValidationError{
+			Message: "密码不能为空",
+			Code:    40000,
+		}
+	}
+
+	user, err := s.userRepo.FindByUsername(dto.Username)
 	if err != nil {
-		return nil, errors.New("用户名或密码错误")
+		return nil, &AuthError{
+			Message: "用户名或密码错误",
+		}
 	}
 
 	// 验证密码
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
-		return nil, errors.New("用户名或密码错误")
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(dto.Password)); err != nil {
+		return nil, &AuthError{
+			Message: "用户名或密码错误",
+		}
 	}
 
 	// 检查用户状态
 	if user.Status != 1 {
-		return nil, errors.New("账号已被禁用")
+		return nil, &BusinessError{
+			Message: "账号已被禁用",
+			Code:    40003,
+		}
 	}
 
-	return user, nil
+	// 生成token
+	token, err := s.GenerateToken(user)
+	if err != nil {
+		return nil, &BusinessError{
+			Message: "生成令牌失败",
+			Code:    50000,
+			Err:     err,
+		}
+	}
+
+	return &LoginResult{
+		User:  user,
+		Token: token,
+	}, nil
 }
 
 // GetUserByID 根据ID获取用户
-func (s *UserService) GetUserByID(id uint) (*model.User, error) {
-	return s.userRepo.FindByID(id)
+func (s *UserService) GetUserByID(ctx *BusinessContext	) (*model.User, ServiceError) {
+	user, err := s.userRepo.FindByID(ctx.Account.ID)
+	if err != nil {
+		return nil, &NotFoundError{
+			Message: "用户不存在",
+		}
+	}
+	return user, nil
+}
+
+// UpdateProfileDTO 更新资料请求DTO
+type UpdateProfileDTO struct {
+	Nickname string
+	Avatar   string
 }
 
 // UpdateProfile 更新用户资料
-func (s *UserService) UpdateProfile(id uint, nickname, avatar string) error {
-	user, err := s.userRepo.FindByID(id)
+func (s *UserService) UpdateProfile(ctx *BusinessContext, dto *UpdateProfileDTO) ServiceError {
+	user, err := s.userRepo.FindByID(ctx.Account.ID)
 	if err != nil {
-		return err
+		return &NotFoundError{
+			Message: "用户不存在",
+		}
 	}
 
-	if nickname != "" {
-		user.Nickname = nickname
+	// 只更新提供的字段
+	if dto.Nickname != "" {
+		user.Nickname = strings.TrimSpace(dto.Nickname)
 	}
-	if avatar != "" {
-		user.Avatar = avatar
+	if dto.Avatar != "" {
+		user.Avatar = strings.TrimSpace(dto.Avatar)
 	}
 
-	return s.userRepo.Update(user)
+	if err := s.userRepo.Update(user); err != nil {
+		return &DatabaseError{
+			Message: "更新用户信息失败",
+			Err:     err,
+		}
+	}
+
+	return nil
+}
+
+// ChangePasswordDTO 修改密码请求DTO
+type ChangePasswordDTO struct {
+	OldPassword string
+	NewPassword string
 }
 
 // ChangePassword 修改密码
-func (s *UserService) ChangePassword(id uint, oldPassword, newPassword string) error {
-	user, err := s.userRepo.FindByID(id)
+func (s *UserService) ChangePassword(ctx *BusinessContext, dto *ChangePasswordDTO) ServiceError {
+	// 参数验证
+	if dto.OldPassword == "" {
+		return &ValidationError{
+			Message: "原密码不能为空",
+			Code:    40000,
+		}
+	}
+	if dto.NewPassword == "" || len(dto.NewPassword) < 6 {
+		return &ValidationError{
+			Message: "新密码长度至少为6个字符",
+			Code:    40000,
+		}
+	}
+
+	user, err := s.userRepo.FindByID(ctx.Account.ID)
 	if err != nil {
-		return err
+		return &NotFoundError{
+			Message: "用户不存在",
+		}
 	}
 
 	// 验证旧密码
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(oldPassword)); err != nil {
-		return errors.New("原密码错误")
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(dto.OldPassword)); err != nil {
+		return &AuthError{
+			Message: "原密码错误",
+		}
 	}
 
 	// 加密新密码
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(dto.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
-		return err
+		return &DatabaseError{
+			Message: "密码加密失败",
+			Err:     err,
+		}
 	}
 
 	user.Password = string(hashedPassword)
-	return s.userRepo.Update(user)
+	if err := s.userRepo.Update(user); err != nil {
+		return &DatabaseError{
+			Message: "更新密码失败",
+			Err:     err,
+		}
+	}
+
+	return nil
+}
+
+// ListUsersQuery 用户列表查询参数
+type ListUsersQuery struct {
+	Page     int
+	PageSize int
+}
+
+// ListUsersResult 用户列表结果
+type ListUsersResult struct {
+	List     []model.User
+	Total    int64
+	Page     int
+	PageSize int
 }
 
 // ListUsers 获取用户列表
-func (s *UserService) ListUsers(page, pageSize int) ([]model.User, int64, error) {
-	if page < 1 {
-		page = 1
+func (s *UserService) ListUsers(ctx *BusinessContext, query *ListUsersQuery) (*ListUsersResult, ServiceError) {
+	// 参数校验和默认值
+	if query.Page < 1 {
+		query.Page = 1
 	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
+	if query.PageSize < 1 || query.PageSize > 100 {
+		query.PageSize = 20
 	}
-	return s.userRepo.List(page, pageSize)
+
+	users, total, err := s.userRepo.List(query.Page, query.PageSize)
+	if err != nil {
+		return nil, &DatabaseError{
+			Message: "查询用户列表失败",
+			Err:     err,
+		}
+	}
+
+	return &ListUsersResult{
+		List:     users,
+		Total:    total,
+		Page:     query.Page,
+		PageSize: query.PageSize,
+	}, nil
 }
 
 // GenerateToken 生成JWT token
-func (s *UserService) GenerateToken(userID string) (string, error) {
-	return conf.GenerateJWT(userID)
+func (s *UserService) GenerateToken(user *model.User) (string, error) {
+	return GenerateJWTWithUser(user)
 }

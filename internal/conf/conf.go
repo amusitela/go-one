@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go-one/internal/cache"
 	"go-one/internal/model"
+	"go-one/internal/service"
 	"go-one/util"
 	"log"
 	"os"
@@ -61,7 +62,7 @@ func InitWithEnvFile(envFile string) {
 	model.Init(dsn, tz)
 
 	// 初始化JWT配置
-	InitJWT()
+	service.InitJWT()
 
 	// 初始化 Sentry（可选）
 	if dsn := os.Getenv("SENTRY_DSN"); dsn != "" {
