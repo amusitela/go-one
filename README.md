@@ -1,6 +1,6 @@
 # Go-One 企业级后端开发框架
 
-> 🚀 一个从生产环境提炼的现代化 Go 后端脚手架，开箱即用，快速构建企业级应用
+> 🚀 一个 Go 后端脚手架，开箱即用，快速构建应用
 
 [![Go Version](https://img.shields.io/badge/Go-1.23%2B-blue)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -73,7 +73,7 @@ HTTP Layer (Gin) → BusinessContext → Service Layer (框架无关) → Reposi
 
 ```bash
 # 1. 复制框架
-git clone https://github.com/your-repo/go-one.git my-project
+git clone https://github.com/amusitela/go-one.git my-project
 cd my-project
 
 # 2. 修改 go.mod 第一行
