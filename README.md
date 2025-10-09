@@ -73,7 +73,7 @@ HTTP Layer (Gin) → BusinessContext → Service Layer (框架无关) → Reposi
 
 ```bash
 # 1. 复制框架
-git clone https://github.com/your-repo/go-one.git my-project
+git clone https://github.com/amusitela/go-one.git my-project
 cd my-project
 
 # 2. 修改 go.mod 第一行
