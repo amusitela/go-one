@@ -1,14 +1,13 @@
 package service
 
 import (
-	"fmt"
-	"go-one/internal/model"
-	"go-one/util"
-	"os"
-	"strconv"
-	"time"
+    "fmt"
+    "go-one/util"
+    "os"
+    "strconv"
+    "time"
 
-	"github.com/golang-jwt/jwt/v5"
+    "github.com/golang-jwt/jwt/v5"
 )
 
 // JWTConfig JWT配置
@@ -30,10 +29,10 @@ const (
 
 // JWTClaims JWT声明
 type JWTClaims struct {
-	UserID    string      `json:"user_id"`
-	TokenType TokenType   `json:"token_type"`
-	Account   *model.User `json:"account,omitempty"` // refresh token不包含完整用户信息
-	jwt.RegisteredClaims
+    UserID    string    `json:"user_id"`
+    TokenType TokenType `json:"token_type"`
+    JTI       string    `json:"jti,omitempty"`
+    jwt.RegisteredClaims
 }
 
 // InitJWT 初始化JWT配置
@@ -68,55 +67,40 @@ func InitJWT() {
 }
 
 // GenerateAccessToken 生成访问令牌（包含完整用户信息）
-func GenerateAccessToken(user *model.User) (string, error) {
-	claims := JWTClaims{
-		UserID:    fmt.Sprintf("%d", user.ID),
-		TokenType: AccessToken,
-		Account:   user,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(JWT.AccessTokenExpire)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			NotBefore: jwt.NewNumericDate(time.Now()),
-		},
-	}
+func GenerateAccessToken(userID string) (string, error) {
+    claims := JWTClaims{
+        UserID:    userID,
+        TokenType: AccessToken,
+        RegisteredClaims: jwt.RegisteredClaims{
+            ExpiresAt: jwt.NewNumericDate(time.Now().Add(JWT.AccessTokenExpire)),
+            IssuedAt:  jwt.NewNumericDate(time.Now()),
+            NotBefore: jwt.NewNumericDate(time.Now()),
+        },
+    }
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(JWT.Secret))
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    return token.SignedString([]byte(JWT.Secret))
 }
 
 // GenerateRefreshToken 生成刷新令牌（仅包含用户ID）
-func GenerateRefreshToken(userID string) (string, error) {
-	claims := JWTClaims{
-		UserID:    userID,
-		TokenType: RefreshToken,
-		Account:   nil, // refresh token不包含用户信息
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(JWT.RefreshTokenExpire)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			NotBefore: jwt.NewNumericDate(time.Now()),
-		},
-	}
+func GenerateRefreshToken(userID string, jti string) (string, error) {
+    claims := JWTClaims{
+        UserID:    userID,
+        TokenType: RefreshToken,
+        JTI:       jti,
+        RegisteredClaims: jwt.RegisteredClaims{
+            ExpiresAt: jwt.NewNumericDate(time.Now().Add(JWT.RefreshTokenExpire)),
+            IssuedAt:  jwt.NewNumericDate(time.Now()),
+            NotBefore: jwt.NewNumericDate(time.Now()),
+        },
+    }
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(JWT.Secret))
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    return token.SignedString([]byte(JWT.Secret))
 }
 
 // GenerateTokenPair 生成token对（access + refresh）
-func GenerateTokenPair(user *model.User) (accessToken, refreshToken string, err error) {
-	userID := fmt.Sprintf("%d", user.ID)
-
-	accessToken, err = GenerateAccessToken(user)
-	if err != nil {
-		return "", "", err
-	}
-
-	refreshToken, err = GenerateRefreshToken(userID)
-	if err != nil {
-		return "", "", err
-	}
-
-	return accessToken, refreshToken, nil
-}
+// 已废弃：令用户服务负责发放并持久化 refresh token
 
 // ParseJWT 解析JWT token
 func ParseJWT(tokenString string) (*JWTClaims, error) {

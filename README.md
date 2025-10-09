@@ -621,6 +621,8 @@ cache.RedisClient.HGet(ctx, "user:1", "name")
 
 ### 认证相关
 
+> 注：当前版本采用“最小负载 Access Token + 持久化 Refresh Token + 旋转/撤销”的认证模型。Access 仅携带 `user_id`，刷新时撤销旧 `jti` 并生成新 `jti`。
+
 #### 用户注册
 ```http
 POST /api/v1/auth/register
@@ -662,6 +664,42 @@ Content-Type: application/json
 }
 ```
 
+#### 刷新令牌
+```http
+POST /api/v1/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "<refresh>"
+}
+```
+
+示例响应：
+```json
+{
+  "code": 0,
+  "msg": "刷新成功",
+  "data": {
+    "access_token": "<new-access>",
+    "refresh_token": "<new-refresh>"
+  }
+}
+```
+
+#### 登出（撤销刷新令牌）
+```http
+POST /api/v1/auth/logout
+Content-Type: application/json
+
+{
+  "refresh_token": "<refresh>"
+}
+```
+示例响应：
+```json
+{ "code": 0, "msg": "已退出登录" }
+```
+
 ### 用户相关（需要认证）
 
 所有以下接口需要在Header中携带Token：
@@ -687,7 +725,7 @@ Content-Type: application/json
 
 #### 修改密码
 ```http
-PUT /api/v1/user/password
+POST /api/v1/user/change-password
 Content-Type: application/json
 
 {
@@ -698,7 +736,7 @@ Content-Type: application/json
 
 #### 用户列表
 ```http
-GET /api/v1/users?page=1&page_size=20
+GET /api/v1/user/list?page=1&page_size=20
 ```
 
 ### 响应格式

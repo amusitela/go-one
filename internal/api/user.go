@@ -116,16 +116,10 @@ func (h *Handler) GetUserProfile(c *gin.Context) {
 	bizCtx := GetBusinessContext(c)
 
 	// 2. 从JWT claims获取用户ID
-	if !bizCtx.IsAuthenticated() {
-		c.JSON(http.StatusUnauthorized, serializer.Err(serializer.CodeUnauthorized, "未认证", nil))
-		return
-	}
-
-	// 从Account获取用户ID
-	if bizCtx.Account == nil {
-		c.JSON(http.StatusBadRequest, serializer.Err(serializer.CodeError, "无法获取用户信息", nil))
-		return
-	}
+    if !bizCtx.IsAuthenticated() {
+        c.JSON(http.StatusUnauthorized, serializer.Err(serializer.CodeUnauthorized, "未认证", nil))
+        return
+    }
 
 	// 3. 调用Service层
 	userService := h.serviceManager.NewUserService()
@@ -145,10 +139,10 @@ func (h *Handler) UpdateUserProfile(c *gin.Context) {
 	bizCtx := GetBusinessContext(c)
 
 	// 2. 验证认证状态
-	if !bizCtx.IsAuthenticated() || bizCtx.Account == nil {
-		c.JSON(http.StatusUnauthorized, serializer.Err(serializer.CodeUnauthorized, "未认证", nil))
-		return
-	}
+    if !bizCtx.IsAuthenticated() {
+        c.JSON(http.StatusUnauthorized, serializer.Err(serializer.CodeUnauthorized, "未认证", nil))
+        return
+    }
 
 	// 3. 绑定请求参数
 	var req UpdateProfileRequest
@@ -181,10 +175,10 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 	bizCtx := GetBusinessContext(c)
 
 	// 2. 验证认证状态
-	if !bizCtx.IsAuthenticated() || bizCtx.Account == nil {
-		c.JSON(http.StatusUnauthorized, serializer.Err(serializer.CodeUnauthorized, "未认证", nil))
-		return
-	}
+    if !bizCtx.IsAuthenticated() {
+        c.JSON(http.StatusUnauthorized, serializer.Err(serializer.CodeUnauthorized, "未认证", nil))
+        return
+    }
 
 	// 3. 绑定请求参数
 	var req ChangePasswordRequest
@@ -279,6 +273,25 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 		RefreshToken: result.RefreshToken,
 	}
 	c.JSON(http.StatusOK, serializer.Success("刷新成功", vto))
+}
+
+// UserLogout 用户登出（撤销刷新令牌）
+func (h *Handler) UserLogout(c *gin.Context) {
+    bizCtx := GetBusinessContext(c)
+
+    var req RefreshTokenRequest
+    if err := c.ShouldBindJSON(&req); err != nil {
+        c.JSON(http.StatusBadRequest, serializer.ParamErr("参数错误", err))
+        return
+    }
+
+    userService := h.serviceManager.NewUserService()
+    if serviceErr := userService.Logout(bizCtx, &service.LogoutDTO{RefreshToken: req.RefreshToken}); serviceErr != nil {
+        HandleServiceError(c, serviceErr)
+        return
+    }
+
+    c.JSON(http.StatusOK, serializer.Success("已退出登录", nil))
 }
 
 // Ping 健康检查

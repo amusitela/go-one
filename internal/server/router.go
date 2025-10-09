@@ -39,6 +39,7 @@ func NewRouter() *gin.Engine {
 			auth.POST("/register", h.UserRegister)
 			auth.POST("/login", h.UserLogin)
 			auth.POST("/refresh", h.RefreshToken) // 刷新令牌
+			auth.POST("/logout", h.UserLogout)
 		}
 
 		// 健康检查

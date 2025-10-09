@@ -1,24 +1,28 @@
 package service
 
 import (
-	"go-one/internal/model"
-	"go-one/internal/repository"
-	"strconv"
-	"strings"
+    "go-one/internal/model"
+    "go-one/internal/repository"
+    "strconv"
+    "strings"
+    "time"
 
-	"golang.org/x/crypto/bcrypt"
+    "github.com/google/uuid"
+    "golang.org/x/crypto/bcrypt"
 )
 
 // UserService 用户服务
 type UserService struct {
-	userRepo repository.UserRepository
+    userRepo repository.UserRepository
+    tokenRepo repository.RefreshTokenRepository
 }
 
 // NewUserService 创建用户服务实例
-func NewUserService(userRepo repository.UserRepository) *UserService {
-	return &UserService{
-		userRepo: userRepo,
-	}
+func NewUserService(userRepo repository.UserRepository, tokenRepo repository.RefreshTokenRepository) *UserService {
+    return &UserService{
+        userRepo:  userRepo,
+        tokenRepo: tokenRepo,
+    }
 }
 
 // RegisterDTO 注册请求DTO
@@ -93,15 +97,25 @@ func (s *UserService) Register(ctx *BusinessContext, dto *RegisterDTO) (*Registe
 		}
 	}
 
-	// 生成token对
-	accessToken, refreshToken, err := GenerateTokenPair(user)
-	if err != nil {
-		return nil, &BusinessError{
-			Message: "生成令牌失败",
-			Code:    50000,
-			Err:     err,
-		}
-	}
+    // 生成访问令牌
+    userIDStr := strconv.FormatUint(uint64(user.ID), 10)
+    accessToken, err := GenerateAccessToken(userIDStr)
+    if err != nil {
+        return nil, &BusinessError{
+            Message: "生成令牌失败",
+            Code:    50000,
+            Err:     err,
+        }
+    }
+    // 生成并持久化刷新令牌（旋转起点，无上游JTI）
+    jti := uuid.NewString()
+    if err := s.tokenRepo.Create(jti, user.ID, time.Now().Add(JWT.RefreshTokenExpire), ""); err != nil {
+        return nil, &DatabaseError{Message: "保存刷新令牌失败", Err: err}
+    }
+    refreshToken, err := GenerateRefreshToken(userIDStr, jti)
+    if err != nil {
+        return nil, &BusinessError{Message: "生成刷新令牌失败", Code: 50000, Err: err}
+    }
 
 	return &RegisterResult{
 		User:         user,
@@ -164,15 +178,26 @@ func (s *UserService) Login(ctx *BusinessContext, dto *LoginDTO) (*LoginResult, 
 		}
 	}
 
-	// 生成token对
-	accessToken, refreshToken, err := GenerateTokenPair(user)
-	if err != nil {
-		return nil, &BusinessError{
-			Message: "生成令牌失败",
-			Code:    50000,
-			Err:     err,
-		}
-	}
+    // 生成访问令牌
+    userIDStr := strconv.FormatUint(uint64(user.ID), 10)
+    accessToken, err := GenerateAccessToken(userIDStr)
+    if err != nil {
+        return nil, &BusinessError{
+            Message: "生成令牌失败",
+            Code:    50000,
+            Err:     err,
+        }
+    }
+
+    // 生成并持久化刷新令牌
+    jti := uuid.NewString()
+    if err := s.tokenRepo.Create(jti, user.ID, time.Now().Add(JWT.RefreshTokenExpire), ""); err != nil {
+        return nil, &DatabaseError{Message: "保存刷新令牌失败", Err: err}
+    }
+    refreshToken, err := GenerateRefreshToken(userIDStr, jti)
+    if err != nil {
+        return nil, &BusinessError{Message: "生成刷新令牌失败", Code: 50000, Err: err}
+    }
 
 	return &LoginResult{
 		User:         user,
@@ -183,13 +208,17 @@ func (s *UserService) Login(ctx *BusinessContext, dto *LoginDTO) (*LoginResult, 
 
 // GetUserByID 根据ID获取用户
 func (s *UserService) GetUserByID(ctx *BusinessContext) (*model.User, ServiceError) {
-	user, err := s.userRepo.FindByID(ctx.Account.ID)
-	if err != nil {
-		return nil, &NotFoundError{
-			Message: "用户不存在",
-		}
-	}
-	return user, nil
+    uid64, err := strconv.ParseUint(ctx.UserUUID, 10, 64)
+    if err != nil || uid64 == 0 {
+        return nil, &AuthError{Message: "无效的用户ID"}
+    }
+    user, err := s.userRepo.FindByID(uint(uid64))
+    if err != nil {
+        return nil, &NotFoundError{
+            Message: "用户不存在",
+        }
+    }
+    return user, nil
 }
 
 // UpdateProfileDTO 更新资料请求DTO
@@ -200,12 +229,16 @@ type UpdateProfileDTO struct {
 
 // UpdateProfile 更新用户资料
 func (s *UserService) UpdateProfile(ctx *BusinessContext, dto *UpdateProfileDTO) ServiceError {
-	user, err := s.userRepo.FindByID(ctx.Account.ID)
-	if err != nil {
-		return &NotFoundError{
-			Message: "用户不存在",
-		}
-	}
+    uid64, err := strconv.ParseUint(ctx.UserUUID, 10, 64)
+    if err != nil || uid64 == 0 {
+        return &AuthError{Message: "无效的用户ID"}
+    }
+    user, err := s.userRepo.FindByID(uint(uid64))
+    if err != nil {
+        return &NotFoundError{
+            Message: "用户不存在",
+        }
+    }
 
 	// 只更新提供的字段
 	if dto.Nickname != "" {
@@ -247,12 +280,16 @@ func (s *UserService) ChangePassword(ctx *BusinessContext, dto *ChangePasswordDT
 		}
 	}
 
-	user, err := s.userRepo.FindByID(ctx.Account.ID)
-	if err != nil {
-		return &NotFoundError{
-			Message: "用户不存在",
-		}
-	}
+    uid64, err := strconv.ParseUint(ctx.UserUUID, 10, 64)
+    if err != nil || uid64 == 0 {
+        return &AuthError{Message: "无效的用户ID"}
+    }
+    user, err := s.userRepo.FindByID(uint(uid64))
+    if err != nil {
+        return &NotFoundError{
+            Message: "用户不存在",
+        }
+    }
 
 	// 验证旧密码
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(dto.OldPassword)); err != nil {
@@ -328,8 +365,8 @@ type RefreshTokenDTO struct {
 
 // RefreshTokenResult 刷新令牌结果
 type RefreshTokenResult struct {
-	AccessToken  string
-	RefreshToken string
+    AccessToken  string
+    RefreshToken string
 }
 
 // RefreshToken 刷新访问令牌
@@ -342,21 +379,33 @@ func (s *UserService) RefreshToken(ctx *BusinessContext, dto *RefreshTokenDTO) (
 		}
 	}
 
-	// 验证refresh token
-	claims, err := ValidateRefreshToken(dto.RefreshToken)
-	if err != nil {
-		return nil, &AuthError{
-			Message: "刷新令牌无效或已过期",
-		}
-	}
+    // 验证refresh token 签名与类型
+    claims, err := ValidateRefreshToken(dto.RefreshToken)
+    if err != nil {
+        return nil, &AuthError{
+            Message: "刷新令牌无效或已过期",
+        }
+    }
 
-	// 从数据库获取最新的用户信息
-	userID, err := strconv.ParseUint(claims.UserID, 10, 64)
-	if err != nil {
-		return nil, &AuthError{
-			Message: "无效的用户ID",
-		}
-	}
+    // 校验JTI是否存在、未撤销且未过期（持久化校验）
+    if claims.JTI == "" {
+        return nil, &AuthError{Message: "无效的刷新令牌标识"}
+    }
+    record, recErr := s.tokenRepo.FindByJTI(claims.JTI)
+    if recErr != nil || record == nil {
+        return nil, &AuthError{Message: "刷新令牌不存在或已撤销"}
+    }
+    if record.Revoked || time.Now().After(record.ExpiresAt) {
+        return nil, &AuthError{Message: "刷新令牌已失效"}
+    }
+
+    // 获取用户信息
+    userID, err := strconv.ParseUint(claims.UserID, 10, 64)
+    if err != nil {
+        return nil, &AuthError{
+            Message: "无效的用户ID",
+        }
+    }
 
 	user, err := s.userRepo.FindByID(uint(userID))
 	if err != nil {
@@ -373,18 +422,49 @@ func (s *UserService) RefreshToken(ctx *BusinessContext, dto *RefreshTokenDTO) (
 		}
 	}
 
-	// 生成新的token对
-	accessToken, refreshToken, err := GenerateTokenPair(user)
-	if err != nil {
-		return nil, &BusinessError{
-			Message: "生成令牌失败",
-			Code:    50000,
-			Err:     err,
-		}
-	}
+    // 撤销当前refresh token并旋转生成新的refresh token
+    _ = s.tokenRepo.RevokeByJTI(claims.JTI)
+    newJTI := uuid.NewString()
+    if err := s.tokenRepo.Create(newJTI, user.ID, time.Now().Add(JWT.RefreshTokenExpire), claims.JTI); err != nil {
+        return nil, &DatabaseError{Message: "保存新刷新令牌失败", Err: err}
+    }
+
+    // 下发新的访问令牌与刷新令牌
+    accessToken, err := GenerateAccessToken(strconv.FormatUint(uint64(user.ID), 10))
+    if err != nil {
+        return nil, &BusinessError{Message: "生成访问令牌失败", Code: 50000, Err: err}
+    }
+    refreshToken, err := GenerateRefreshToken(strconv.FormatUint(uint64(user.ID), 10), newJTI)
+    if err != nil {
+        return nil, &BusinessError{Message: "生成刷新令牌失败", Code: 50000, Err: err}
+    }
 
 	return &RefreshTokenResult{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 	}, nil
+}
+
+// LogoutDTO 登出请求DTO（撤销刷新令牌）
+type LogoutDTO struct {
+    RefreshToken string
+}
+
+// Logout 撤销刷新令牌（登出）
+func (s *UserService) Logout(ctx *BusinessContext, dto *LogoutDTO) ServiceError {
+    if dto.RefreshToken == "" {
+        return &ValidationError{Message: "刷新令牌不能为空", Code: 40000}
+    }
+    claims, err := ValidateRefreshToken(dto.RefreshToken)
+    if err != nil {
+        return &AuthError{Message: "刷新令牌无效或已过期"}
+    }
+    if claims.JTI == "" {
+        return &AuthError{Message: "无效的刷新令牌标识"}
+    }
+    // 标记撤销（幂等）
+    if err := s.tokenRepo.RevokeByJTI(claims.JTI); err != nil {
+        return &DatabaseError{Message: "撤销刷新令牌失败", Err: err}
+    }
+    return nil
 }
